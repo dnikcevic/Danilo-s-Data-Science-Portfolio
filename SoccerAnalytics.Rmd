@@ -1,0 +1,308 @@
+---
+title: "Soccer Training Performance Analytics"
+author: "Danilo Nikcevic"
+date: "2023-12-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Loading data and observing values
+```{r}
+library(readxl)
+###To get decimals for summary stats
+options(scipen = 999)
+###To avoid warnings
+options(warn = -1)
+trainingdata <- read_excel('C:/Users/Asus/OneDrive/Desktop/SoccerAnalytics/DataTask.xlsx', sheet = 2)
+
+column_names <- c("Position", "Day", "Date", "NewName", "New.Drill",
+                  'Time.mins.','Distance.m.', 'MaxSpeed.m.s.','High.Decelerations', 'HighSpeed', 'SprintDistance')
+
+colnames(trainingdata) <- column_names
+
+###Get the insight in how data looks
+head(trainingdata)
+
+###Get the insight in missing values
+trainingdata[trainingdata$Day == 36 & trainingdata$NewName %in% c("Makhi Parks", "Moses Stephens"),]
+
+```
+
+# Making a subset for each player individually so models can be made solely based on their performance
+
+```{r}
+### Making a subset for Park's data - so models can be made based on his performance
+subset_Parks1 <- data.frame(trainingdata[trainingdata$NewName == 'Makhi Parks',])
+
+### Making a subset for Stephen's data - so models can be made based on his performance
+subset_Stephens1 <- data.frame(trainingdata[trainingdata$NewName == 'Moses Stephens',])
+
+### Omitting NA's (rows with missing values) from subsets. This step is done in order to models with available data for Parks/Stephens
+subset_Parks <- na.omit(subset_Parks1)
+subset_Stephens <- na.omit(subset_Stephens1)
+
+
+### Dropping rows with targeted players from the dataset because they will be added again when all predictions are set 
+trainingdata <- subset(trainingdata, !(trainingdata$NewName %in% 'Makhi Parks'))
+trainingdata <- subset(trainingdata, !(trainingdata$NewName %in% 'Moses Stephens'))
+```
+
+# Approach
+
+There are many different ways to fill missing values from dataframe. Decision is to approach the problem by making linear regression models. The other techniques that could be used are: mean, median value or mode value.
+
+Since columns New Drill and Time are available in dataset for the days data is missed, they are used in model to predict Distance column. Once the Distance is predicted, it's used in the next model alongside New Drill and Time to predict Maximum Speed. The process is repeated for other columns which means that every time predictions are made for a new column - it's added to a new model for the next column. This combination of linear models is the choice because it achieves the highest Adjusted R2 (proportion of variance explained in the dependent variable by independent variables resilient to number of predictors) and the most reasonable results after analysis. 
+
+
+
+# Makhi Park Models
+```{r}
+### Creating vectors of available values for Makhi Parks for Time and New Drill columns. This step makes approach simpler and more efficient when making predictions
+Time <- c(60.8300,12.0575,23.2925,2.4850,2.2225,2.3275,3.1850,2.4150)
+NewDrill <- c('Full Session', 'Warm Up', 'Tactical','Possession', 'Possession', 'Possession', 'Possession', 'Possession')
+
+### Predicting Distance values - making a Linear Regression model to predict Distance with NewDrill and Time columns
+model_parksDistance <- lm(Distance.m.~Time.mins.+New.Drill, data = subset_Parks)
+
+###Making a data frame for predictions
+predictiondata <- data.frame(Time.mins. = Time, New.Drill = NewDrill)
+
+#Making predictions
+distancepredictions <- round(predict(model_parksDistance, newdata = predictiondata))
+
+# Identify the missing values
+###NOTE - Use subset_Parks1 here because that dataset contains NAs
+missing_values <- is.na(subset_Parks1$Distance.m.)
+# Replace missing values with new values
+subset_Parks1$Distance.m.[missing_values] <- distancepredictions
+
+
+summary(model_parksDistance)
+distancepredictions
+
+### Predicting MaxSpeed - making a Linear Regression model to predict MaxSpeed with NewDrill, Time + Distance from the previous model
+model_parksMaxSpeed <- lm(MaxSpeed.m.s. ~ New.Drill+Distance.m.+Time.mins., data = subset_Parks)
+
+### Making a data frame for predictions
+predictiondata <- data.frame(Time.mins. = Time, New.Drill = NewDrill, Distance.m. = c(distancepredictions))
+
+# Making predictions
+MaxSpeedpredictions <- predict(model_parksMaxSpeed, newdata = predictiondata)
+
+# Print the predictions
+summary(model_parksMaxSpeed)
+print(MaxSpeedpredictions)
+
+### Predicting High Speed - making a Linear Regression model to predict HighSpeed with NewDrill, Time + Distance + MaxSpeed from previous models
+model_highspeed <- lm(HighSpeed ~ MaxSpeed.m.s. + Distance.m.+Time.mins.+New.Drill, data = subset_Parks)
+
+
+
+### Making a data frame for predictions
+predictiondata <- data.frame(Time.mins. = Time, Distance.m. = c(distancepredictions),MaxSpeed.m.s. = c(MaxSpeedpredictions), New.Drill =NewDrill)
+
+# Make predictions using the linear model
+highspeedpredictions <- round(predict(model_highspeed, newdata = predictiondata))
+
+missing_values <- is.na(subset_Parks1$HighSpeed)
+# Replace missing values with the input values
+subset_Parks1$HighSpeed[missing_values] <- highspeedpredictions
+
+summary(model_highspeed)
+highspeedpredictions
+
+### Predicting SprintDistance - making a Linear Regression model to predict SprintDistance with NewDrill, Time + Distance + MaxSpeed + HighSpeed from previous models
+model_sprintdistance <- lm(SprintDistance ~ MaxSpeed.m.s. + Distance.m.+Time.mins.+ New.Drill+ HighSpeed, data = subset_Parks)
+
+
+
+### Making a data frame for predictions
+predictiondata <- data.frame(Time.mins. = Time, Distance.m. = c(distancepredictions),MaxSpeed.m.s. = c(MaxSpeedpredictions), New.Drill = NewDrill, HighSpeed = c(highspeedpredictions))
+
+# Make predictions using the linear model
+sprintdistancepredictions <- round(predict(model_sprintdistance, newdata = predictiondata))
+
+
+missing_values <- is.na(subset_Parks1$SprintDistance)
+# Replace missing values with the input values
+subset_Parks1$SprintDistance[missing_values] <- sprintdistancepredictions
+
+summary(model_sprintdistance)
+print(sprintdistancepredictions)
+
+### Predicting High.Decelerations - making a Linear Regression model to predict High.Decelerations with NewDrill, Time + Distance + MaxSpeed + HighSpeed + SprintDistance from previous models
+model_parksdecel <- lm(High.Decelerations ~ MaxSpeed.m.s. + Distance.m.+Time.mins.+New.Drill+HighSpeed+SprintDistance, data = subset_Parks)
+
+
+### Making a data frame for predictions
+predictiondata <- data.frame(Time.mins. = Time, Distance.m. = c(distancepredictions),MaxSpeed.m.s. = c(MaxSpeedpredictions), New.Drill = NewDrill, HighSpeed = c(highspeedpredictions), SprintDistance = c(sprintdistancepredictions))
+# Making predictions
+decelpredictions <- round(predict(model_parksdecel, newdata = predictiondata))
+# Print the predictions
+print(decelpredictions)
+missing_values <- is.na(subset_Parks1$High.Decelerations)
+# Replace missing values with the input values
+subset_Parks1$High.Decelerations[missing_values] <- decelpredictions
+
+summary(model_parksdecel)
+decelpredictions
+
+### Improving MaxSpeed results
+improveMaxSpeed <- lm(MaxSpeed.m.s.~ High.Decelerations  + Distance.m. +Time.mins. + HighSpeed + SprintDistance + New.Drill, data = subset_Parks)
+summary(improveMaxSpeed)
+summary(model_parksMaxSpeed)
+####When compared to the previous model, R-squared is improved by 11% and Residuals Error by 0.6
+
+### Making a data frame for predictions
+predictiondata <- data.frame(Time.mins. = Time, Distance.m. = c(distancepredictions),High.Decelerations = c(decelpredictions), New.Drill = NewDrill, HighSpeed = c(highspeedpredictions), SprintDistance = c(sprintdistancepredictions))
+# Making predictions
+maxspeedpredictions <- round(predict(improveMaxSpeed, newdata = predictiondata),2)
+missing_values <- is.na(subset_Parks1$MaxSpeed.m.s.)
+# Replace missing values with the input values
+subset_Parks1$MaxSpeed.m.s.[missing_values] <- maxspeedpredictions
+print(maxspeedpredictions)
+```
+
+# Adding Makhi Parks results to the Data Frame
+```{r}
+trainingdata <- rbind(trainingdata, subset_Parks1)
+```
+
+
+# Moses Stephens Models
+```{r}
+### Creating vectors of available values for Moses Stephens for Time and New Drill columns. This step makes approach simpler and more efficient when making predictions
+Time <- c(60.8300, 2.2225, 2.3275, 3.1850, 2.4150)
+NewDrill <- c('Full Session', 'Possession','Possession','Possession','Possession') 
+
+
+### Predicting Distance values - making a Linear Regression model to predict Distance with NewDrill and Time columns
+model_StephensDistance <- lm(Distance.m.~Time.mins.+New.Drill, data = subset_Stephens)
+
+### Making a data frame for predictions
+predictiondata <- data.frame(Time.mins. = Time, New.Drill = NewDrill)
+
+#Making predictions
+distancepredictions <- round(predict(model_StephensDistance, newdata = predictiondata))
+
+missing_values <- is.na(subset_Stephens1$Distance.m.)
+# Replace missing values with the input values
+subset_Stephens1$Distance.m.[missing_values] <- distancepredictions
+
+summary(model_StephensDistance)
+distancepredictions
+### Predicting MaxSpeed - making a Linear Regression model to predict MaxSpeed with NewDrill, Time + Distance from previous model
+model_StephensMaxSpeed <- lm(MaxSpeed.m.s. ~ Time.mins.+New.Drill+Distance.m., data = subset_Stephens)
+
+
+predictiondata <- data.frame(Time.mins. = Time, New.Drill = NewDrill, Distance.m. = c(distancepredictions))
+
+# Making predictions
+MaxSpeedpredictions <- predict(model_StephensMaxSpeed, newdata = predictiondata)
+
+summary(model_StephensMaxSpeed)
+print(MaxSpeedpredictions)
+
+### Predicting High Speed - making a Linear Regression model to predict HighSpeed with NewDrill, Time + Distance + MaxSpeed from previous models
+model_highspeed <- lm(HighSpeed ~ MaxSpeed.m.s. + Distance.m.+Time.mins.+New.Drill, data = subset_Stephens)
+
+
+predictiondata <- data.frame(Time.mins. = Time, Distance.m. = c(distancepredictions),MaxSpeed.m.s. = c(MaxSpeedpredictions), New.Drill =NewDrill)
+
+# Make predictions using the linear model
+highspeedpredictions <- round(predict(model_highspeed, newdata = predictiondata))
+
+missing_values <- is.na(subset_Stephens1$HighSpeed)
+# Replace missing values with the input values
+subset_Stephens1$HighSpeed[missing_values] <- highspeedpredictions
+
+
+summary(model_highspeed)
+
+print(highspeedpredictions)
+
+
+### Predicting SprintDistance - making a Linear Regression model to predict SprintDistance with NewDrill, Time + Distance + MaxSpeed + HighSpeed from previous models
+model_sprintdistance <- lm(SprintDistance ~ MaxSpeed.m.s. + Distance.m.+Time.mins.+ New.Drill+ HighSpeed, data = subset_Stephens)
+
+
+### Making a data frame for predictions
+predictiondata <- data.frame(Time.mins. = Time, Distance.m. = c(distancepredictions),MaxSpeed.m.s. = c(MaxSpeedpredictions), New.Drill = NewDrill, HighSpeed = c(highspeedpredictions))
+
+# Make predictions using the linear model
+sprintdistancepredictions <- round(predict(model_sprintdistance, newdata = predictiondata))
+
+
+missing_values <- is.na(subset_Stephens1$SprintDistance)
+# Replace missing values with the input values
+subset_Stephens1$SprintDistance[missing_values] <- sprintdistancepredictions
+
+summary(model_sprintdistance)
+print(sprintdistancepredictions)
+
+### Predicting High.Decelerations - making a Linear Regression model to predict High.Decelerations with NewDrill, Time + Distance + MaxSpeed + HighSpeed + SprintDistance from previous models
+model_decel <- lm(High.Decelerations ~ MaxSpeed.m.s. + Distance.m.+Time.mins.+New.Drill+HighSpeed+SprintDistance, data = subset_Stephens)
+
+
+###Making a data frame for predictions
+predictiondata <- data.frame(Time.mins. = Time, Distance.m. = c(distancepredictions),MaxSpeed.m.s. = c(MaxSpeedpredictions), New.Drill = NewDrill, HighSpeed = c(highspeedpredictions), SprintDistance = c(sprintdistancepredictions))
+
+
+# Making predictions
+decelpredictions <- round(predict(model_decel, newdata = predictiondata))
+
+missing_values <- is.na(subset_Stephens1$High.Decelerations)
+# Replace missing values with the input values
+subset_Stephens1$High.Decelerations[missing_values] <- decelpredictions
+
+summary(model_decel)
+
+print(decelpredictions)
+
+
+####Trying to improve MaxSpeed results
+improveMaxSpeed <- lm(MaxSpeed.m.s. ~ Time.mins. + Distance.m. + High.Decelerations + HighSpeed + SprintDistance + New.Drill, data = subset_Stephens)
+
+
+summary(improveMaxSpeed)
+### The model shows improvement in summary statistics 
+summary(model_StephensMaxSpeed)
+
+### Making a data frame for predictions
+predictiondata <- data.frame(Time.mins. = Time, Distance.m. = c(distancepredictions),High.Decelerations = c(decelpredictions), New.Drill = NewDrill, HighSpeed = c(highspeedpredictions), SprintDistance = c(sprintdistancepredictions))
+# Making predictions
+maxspeedpredictions <- round(predict(improveMaxSpeed, newdata = predictiondata),2)
+# Print the predictions
+print(maxspeedpredictions)
+
+```
+
+# Adding Moses Stephens results to the Data Frame
+```{R}
+trainingdata <- rbind(trainingdata, subset_Stephens1)
+```
+
+
+# Finalizing and exporting dataset
+```{r}
+trainingdata <- trainingdata[order(trainingdata$Day), ]
+####Final dataset export:
+library(openxlsx)
+write.xlsx(trainingdata, file = "finaltrainingdata.xlsx", rowNames = FALSE)
+```
+# Conclusion
+The models that utilize all available columns, including time and drills, have demonstrated superior performance compared to models that only use time and drills.
+
+Models are indicating that Distance is highly dependent and very predictable by Time and Drills whereas Maximum Speed and Sprint Distance need more predictors to get accurate results. High Speed and High Decelerations can be decently predicted by time and drills - Adjusted R squared for both players is > 0.59, but if there are more predictors used, models perform way better - Adjusted R squared for both players is >= 0.79.
+
+The observation of the predicted values compared to the existing values indicates that the final models provide reasonable predictions that align well with the rest of the available data for the players. This suggests that the selected combination of linear models captures the underlying relationships effectively.
+
+The final dataset has been exported to an XLSX file, and the predicted values have been appropriately rounded to align with the structure of the received dataset.
+
+Limitations and biases: Small size of the dataset. This can result in insufficient data to adequately capture the underlying patterns and relationships in the variables. A smaller sample size may not provide enough variability to generalize the results accurately. Idea to overcome limitations and biases: Generate synthetic data and increase the number of rows in that way.
+
+Danilo Nikcevic
